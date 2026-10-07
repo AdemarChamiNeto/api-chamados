@@ -88,7 +88,7 @@ final class ApiTest extends TestCase
         return $res->data();
     }
 
-    private function status(int $id, string $as, string $status, ?string $note = null): Response
+    private function mudarStatus(int $id, string $as, string $status, ?string $note = null): Response
     {
         return $this->call('PATCH', "/api/tickets/$id/status", $as, array_filter(['status' => $status, 'note' => $note]));
     }
@@ -181,8 +181,8 @@ final class ApiTest extends TestCase
         $t = $this->open(); // média: 18 h úteis -> vence sexta 09:00 SP
         $this->assertSame('2026-10-09T12:00:00Z', $t['sla']['resolution_due_at']);
 
-        $this->status($t['id'], 'tec1', 'em_atendimento');
-        $res = $this->status($t['id'], 'tec1', 'aguardando_usuario', 'Qual o número do patrimônio?');
+        $this->mudarStatus($t['id'], 'tec1', 'em_atendimento');
+        $res = $this->mudarStatus($t['id'], 'tec1', 'aguardando_usuario', 'Qual o número do patrimônio?');
         $this->assertTrue($res->data()['sla']['paused']);
 
         // usuário responde 3 h úteis depois (09:00 -> 13:00 com almoço) e o chamado volta para a fila
@@ -223,19 +223,19 @@ final class ApiTest extends TestCase
         $id = $this->open()['id'];
         $this->clock->advance('+10 minutes');
 
-        $taken = $this->status($id, 'tec1', 'em_atendimento')->data();
+        $taken = $this->mudarStatus($id, 'tec1', 'em_atendimento')->data();
         $this->assertSame('Téc 1', $taken['assignee']['name'], 'quem atende vira responsável');
         $this->assertSame('2026-10-07T12:10:00Z', $taken['first_response_at']);
 
-        $this->assertSame(422, $this->status($id, 'tec1', 'resolvido')->status, 'resolver exige nota');
-        $resolved = $this->status($id, 'tec1', 'resolvido', 'Fonte trocada.')->data();
+        $this->assertSame(422, $this->mudarStatus($id, 'tec1', 'resolvido')->status, 'resolver exige nota');
+        $resolved = $this->mudarStatus($id, 'tec1', 'resolvido', 'Fonte trocada.')->data();
         $this->assertNotNull($resolved['resolved_at']);
         $this->assertFalse($resolved['sla']['resolution_breached']);
 
-        $reopened = $this->status($id, 'sol1', 'em_atendimento')->data();
+        $reopened = $this->mudarStatus($id, 'sol1', 'em_atendimento')->data();
         $this->assertNull($reopened['resolved_at'], 'reabrir limpa a solução');
-        $this->status($id, 'tec1', 'resolvido', 'Fonte trocada de novo.');
-        $closed = $this->status($id, 'sol1', 'fechado')->data();
+        $this->mudarStatus($id, 'tec1', 'resolvido', 'Fonte trocada de novo.');
+        $closed = $this->mudarStatus($id, 'sol1', 'fechado')->data();
         $this->assertSame('fechado', $closed['status']);
         $this->assertSame([], $closed['allowed_status']);
 
@@ -247,10 +247,10 @@ final class ApiTest extends TestCase
     public function testInvalidTransitionExplainsWhatIsAllowed(): void
     {
         $id = $this->open()['id'];
-        $res = $this->status($id, 'tec1', 'resolvido', 'pulando etapas');
+        $res = $this->mudarStatus($id, 'tec1', 'resolvido', 'pulando etapas');
         $this->assertSame(409, $res->status);
         $this->assertStringContainsString('em_atendimento', $res->data()['error']['message']);
-        $this->assertSame(409, $this->status($id, 'sol1', 'em_atendimento')->status);
+        $this->assertSame(409, $this->mudarStatus($id, 'sol1', 'em_atendimento')->status);
     }
 
     // ---------- permissões ----------
@@ -351,8 +351,8 @@ final class ApiTest extends TestCase
     {
         $a = $this->open()['id'];
         $this->open('sol2', 'alto', 'alto');
-        $this->status($a, 'tec1', 'em_atendimento');
-        $this->status($a, 'tec1', 'resolvido', 'Resolvido rápido.');
+        $this->mudarStatus($a, 'tec1', 'em_atendimento');
+        $this->mudarStatus($a, 'tec1', 'resolvido', 'Resolvido rápido.');
         $this->clock->set('2026-10-08 18:00:00');
 
         $m = $this->call('GET', '/api/metrics', 'admin')->data();
