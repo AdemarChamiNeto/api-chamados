@@ -1,0 +1,348 @@
+openapi: 3.0.3
+info:
+  title: API de Chamados (helpdesk)
+  version: 1.0.0
+  description: |
+    API REST de service desk: abertura de chamados com prioridade pela matriz **impacto × urgência** (ITIL),
+    SLA de primeira resposta e de solução contado em **horário comercial** (seg–sex, 08–12 e 13–18, fuso de São Paulo,
+    descontando os feriados configurados), pausa do SLA enquanto aguarda o usuário, comentários internos e histórico.
+
+    **Para testar aqui:** faça `POST /api/auth/login` com um usuário de demonstração (senha `senha-demo-123`):
+    `admin@exemplo.com`, `bruno@exemplo.com` (técnico) ou `diego@exemplo.com` (solicitante).
+    Copie o `token`, clique em **Authorize** e cole.
+servers:
+  - url: /
+tags:
+  - name: Auth
+  - name: Chamados
+  - name: Indicadores
+  - name: Usuários
+security:
+  - bearer: []
+
+components:
+  securitySchemes:
+    bearer: { type: http, scheme: bearer, bearerFormat: JWT }
+  parameters:
+    Id: { name: id, in: path, required: true, schema: { type: integer } }
+  responses:
+    Error:
+      description: Erro
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code: { type: string, example: validation_error }
+            message: { type: string, example: Dados inválidos }
+            details: { type: object, additionalProperties: { type: string }, example: { title: Obrigatório } }
+    Level: { type: string, enum: [alto, medio, baixo] }
+    Priority: { type: string, enum: [critica, alta, media, baixa] }
+    Status: { type: string, enum: [aberto, em_atendimento, aguardando_usuario, resolvido, fechado, cancelado] }
+    Category: { type: string, enum: [hardware, software, acesso, rede, impressao, outros] }
+    User:
+      type: object
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        email: { type: string }
+        role: { type: string, enum: [solicitante, tecnico, admin] }
+        active: { type: boolean }
+        created_at: { type: string }
+    Sla:
+      type: object
+      properties:
+        response_due_at: { type: string, format: date-time }
+        resolution_due_at: { type: string, format: date-time }
+        paused: { type: boolean, description: Aguardando o usuário (relógio parado) }
+        response_breached: { type: boolean }
+        resolution_breached: { type: boolean }
+        business_minutes_left: { type: integer, nullable: true, description: Negativo quando atrasado }
+    Ticket:
+      type: object
+      properties:
+        id: { type: integer }
+        title: { type: string }
+        category: { $ref: '#/components/schemas/Category' }
+        impact: { $ref: '#/components/schemas/Level' }
+        urgency: { $ref: '#/components/schemas/Level' }
+        priority: { $ref: '#/components/schemas/Priority' }
+        status: { $ref: '#/components/schemas/Status' }
+        requester: { type: object, properties: { id: { type: integer }, name: { type: string } } }
+        assignee: { type: object, nullable: true, properties: { id: { type: integer }, name: { type: string } } }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        first_response_at: { type: string, format: date-time, nullable: true }
+        resolved_at: { type: string, format: date-time, nullable: true }
+        closed_at: { type: string, format: date-time, nullable: true }
+        sla: { $ref: '#/components/schemas/Sla' }
+        allowed_status:
+          type: array
+          items: { $ref: '#/components/schemas/Status' }
+          description: Status para onde o usuário logado pode mover o chamado
+    TicketDetail:
+      allOf:
+        - $ref: '#/components/schemas/Ticket'
+        - type: object
+          properties:
+            description: { type: string }
+            comments:
+              type: array
+              items:
+                type: object
+                properties:
+                  id: { type: integer }
+                  body: { type: string }
+                  internal: { type: boolean }
+                  author: { type: object, properties: { id: { type: integer }, name: { type: string }, role: { type: string } } }
+                  created_at: { type: string, format: date-time }
+            history:
+              type: array
+              items:
+                type: object
+                properties:
+                  type: { type: string, enum: [created, status, assignee, priority] }
+                  from: { type: string, nullable: true }
+                  to: { type: string, nullable: true }
+                  note: { type: string, nullable: true }
+                  actor: { type: string }
+                  at: { type: string, format: date-time }
+
+paths:
+  /api/health:
+    get:
+      tags: [Auth]
+      summary: A API está no ar?
+      security: []
+      responses: { '200': { description: OK } }
+
+  /api/auth/login:
+    post:
+      tags: [Auth]
+      summary: Login (5 tentativas erradas bloqueiam o email por 15 min)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, example: bruno@exemplo.com }
+                password: { type: string, example: senha-demo-123 }
+      responses:
+        '200':
+          description: Token JWT (8 h)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token: { type: string }
+                  user: { $ref: '#/components/schemas/User' }
+        '401': { $ref: '#/components/responses/Error' }
+        '429': { $ref: '#/components/responses/Error' }
+
+  /api/me:
+    get:
+      tags: [Auth]
+      summary: Usuário logado
+      responses:
+        '200': { description: Usuário, content: { application/json: { schema: { $ref: '#/components/schemas/User' } } } }
+        '401': { $ref: '#/components/responses/Error' }
+
+  /api/tickets:
+    get:
+      tags: [Chamados]
+      summary: Lista chamados (solicitante vê só os próprios)
+      parameters:
+        - { name: status, in: query, schema: { type: string }, description: 'Um ou mais, separados por vírgula', example: 'aberto,em_atendimento' }
+        - { name: priority, in: query, schema: { type: string }, example: 'critica,alta' }
+        - { name: category, in: query, schema: { $ref: '#/components/schemas/Category' } }
+        - { name: assignee, in: query, schema: { type: string }, description: 'ID do responsável, "me" ou "none"' }
+        - { name: overdue, in: query, schema: { type: boolean }, description: Só os com prazo de solução vencido }
+        - { name: q, in: query, schema: { type: string }, description: Busca no título e na descrição }
+        - { name: sort, in: query, schema: { type: string, enum: [created_at, -created_at, updated_at, -updated_at, priority, -priority, resolution_due_at, -resolution_due_at] }, description: 'Padrão: -created_at' }
+        - { name: page, in: query, schema: { type: integer, default: 1 } }
+        - { name: per_page, in: query, schema: { type: integer, default: 20, maximum: 100 } }
+      responses:
+        '200':
+          description: Página de chamados
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/Ticket' } }
+                  meta:
+                    type: object
+                    properties:
+                      page: { type: integer }
+                      per_page: { type: integer }
+                      total: { type: integer }
+                      last_page: { type: integer }
+        '422': { $ref: '#/components/responses/Error' }
+    post:
+      tags: [Chamados]
+      summary: Abre um chamado (a prioridade sai de impacto × urgência)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, description, category, impact, urgency]
+              properties:
+                title: { type: string, minLength: 5, maxLength: 150, example: Impressora não imprime }
+                description: { type: string, minLength: 10, example: A impressora do 2º andar mostra erro de papel atolado. }
+                category: { $ref: '#/components/schemas/Category' }
+                impact: { $ref: '#/components/schemas/Level' }
+                urgency: { $ref: '#/components/schemas/Level' }
+      responses:
+        '201': { description: Criado, content: { application/json: { schema: { $ref: '#/components/schemas/TicketDetail' } } } }
+        '422': { $ref: '#/components/responses/Error' }
+
+  /api/tickets/{id}:
+    get:
+      tags: [Chamados]
+      summary: Detalhe com comentários e histórico (internos só para a equipe)
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200': { description: Chamado, content: { application/json: { schema: { $ref: '#/components/schemas/TicketDetail' } } } }
+        '404': { $ref: '#/components/responses/Error' }
+
+  /api/tickets/{id}/status:
+    patch:
+      tags: [Chamados]
+      summary: Muda o status (transições dependem do papel; resolvido/aguardando/cancelado exigem nota)
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: { $ref: '#/components/schemas/Status' }
+                note: { type: string, description: Vira um comentário público }
+      responses:
+        '200': { description: Atualizado, content: { application/json: { schema: { $ref: '#/components/schemas/TicketDetail' } } } }
+        '409': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+
+  /api/tickets/{id}/assignee:
+    patch:
+      tags: [Chamados]
+      summary: Atribui o responsável (técnico só a si mesmo; admin a qualquer técnico)
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [assignee_id]
+              properties:
+                assignee_id: { type: integer, nullable: true }
+      responses:
+        '200': { description: Atualizado, content: { application/json: { schema: { $ref: '#/components/schemas/TicketDetail' } } } }
+        '403': { $ref: '#/components/responses/Error' }
+
+  /api/tickets/{id}/priority:
+    patch:
+      tags: [Chamados]
+      summary: Corrige a prioridade (equipe) e recalcula os prazos
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [priority, reason]
+              properties:
+                priority: { $ref: '#/components/schemas/Priority' }
+                reason: { type: string, example: Afeta o faturamento }
+      responses:
+        '200': { description: Atualizado, content: { application/json: { schema: { $ref: '#/components/schemas/TicketDetail' } } } }
+        '403': { $ref: '#/components/responses/Error' }
+
+  /api/tickets/{id}/comments:
+    post:
+      tags: [Chamados]
+      summary: Comenta (resposta do solicitante tira o chamado da pausa)
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [body]
+              properties:
+                body: { type: string }
+                internal: { type: boolean, default: false, description: Só a equipe vê }
+      responses:
+        '201': { description: Criado, content: { application/json: { schema: { $ref: '#/components/schemas/TicketDetail' } } } }
+        '409': { $ref: '#/components/responses/Error' }
+
+  /api/metrics:
+    get:
+      tags: [Indicadores]
+      summary: Fila, atrasados e % de cumprimento do SLA (equipe)
+      parameters:
+        - { name: days, in: query, schema: { type: integer, default: 30, minimum: 1, maximum: 365 } }
+      responses:
+        '200': { description: Indicadores }
+        '403': { $ref: '#/components/responses/Error' }
+
+  /api/users:
+    get:
+      tags: [Usuários]
+      summary: Lista usuários (equipe)
+      parameters:
+        - { name: role, in: query, schema: { type: string, enum: [solicitante, tecnico, admin] } }
+      responses:
+        '200': { description: Usuários }
+    post:
+      tags: [Usuários]
+      summary: Cria usuário (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, email, password, role]
+              properties:
+                name: { type: string }
+                email: { type: string }
+                password: { type: string, minLength: 8 }
+                role: { type: string, enum: [solicitante, tecnico, admin] }
+      responses:
+        '201': { description: Criado, content: { application/json: { schema: { $ref: '#/components/schemas/User' } } } }
+        '422': { $ref: '#/components/responses/Error' }
+
+  /api/users/{id}:
+    patch:
+      tags: [Usuários]
+      summary: Ativa ou desativa (admin) — desativar corta o acesso na hora
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                active: { type: boolean }
+      responses:
+        '200': { description: Atualizado }
+        '409': { $ref: '#/components/responses/Error' }

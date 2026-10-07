@@ -1,0 +1,32 @@
+services:
+  db:
+    image: mysql:8.0
+    environment:
+      MYSQL_DATABASE: chamados
+      MYSQL_USER: chamados
+      MYSQL_PASSWORD: chamados
+      MYSQL_ROOT_PASSWORD: root
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uchamados", "-pchamados"]
+      interval: 5s
+      retries: 20
+    volumes:
+      - dbdata:/var/lib/mysql
+
+  api:
+    build: .
+    ports:
+      - "8080:80"
+    environment:
+      DB_DSN: mysql:host=db;port=3306;dbname=chamados;charset=utf8mb4
+      DB_USER: chamados
+      DB_PASSWORD: chamados
+      JWT_SECRET: ${JWT_SECRET:-troque-este-segredo-de-desenvolvimento-local}
+      SLA_HOLIDAYS: 2026-10-12,2026-11-02,2026-11-15,2026-11-20,2026-12-25
+      SEED_DEMO: "1"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  dbdata:

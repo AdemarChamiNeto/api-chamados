@@ -1,0 +1,5 @@
+/vendor/
+/database/*.sqlite
+.env
+.phpunit.cache/
+.phpunit.result.cache

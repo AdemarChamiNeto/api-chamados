@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        php: ["8.3", "8.4"]
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_DATABASE: chamados_test
+          MYSQL_USER: app
+          MYSQL_PASSWORD: app
+          MYSQL_ROOT_PASSWORD: root
+        ports: ["3306:3306"]
+        options: --health-cmd="mysqladmin ping -h localhost" --health-interval=5s --health-retries=20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: pdo_sqlite, pdo_mysql, mbstring
+          coverage: none
+      - run: composer install --no-interaction --no-progress
+      - name: Lint (php -l)
+        run: find src bin public tests -name '*.php' -print0 | xargs -0 -n1 php -l
+      - name: Testes (SQLite)
+        run: vendor/bin/phpunit
+      - name: Testes (MySQL)
+        run: vendor/bin/phpunit
+        env:
+          TEST_DB_DSN: mysql:host=127.0.0.1;port=3306;dbname=chamados_test;charset=utf8mb4
+          TEST_DB_USER: app
+          TEST_DB_PASSWORD: app

@@ -1,0 +1,28 @@
+{
+  "name": "ademarchamineto/api-chamados",
+  "description": "API REST de helpdesk em PHP 8 puro: chamados, SLA em horário comercial, prioridade ITIL, JWT e PDO (MySQL/SQLite).",
+  "type": "project",
+  "license": "MIT",
+  "require": {
+    "php": ">=8.3",
+    "ext-pdo": "*",
+    "ext-json": "*",
+    "ext-mbstring": "*"
+  },
+  "require-dev": {
+    "phpunit/phpunit": "^11.5"
+  },
+  "autoload": {
+    "psr-4": { "Chamados\\": "src/" }
+  },
+  "autoload-dev": {
+    "psr-4": { "Chamados\\Tests\\": "tests/" }
+  },
+  "scripts": {
+    "test": "phpunit",
+    "serve": "php -S localhost:8080 -t public",
+    "migrate": "php bin/migrate.php",
+    "seed": "php bin/seed.php"
+  },
+  "config": { "sort-packages": true }
+}
