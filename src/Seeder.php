@@ -21,7 +21,12 @@ final class Seeder
         $now ??= new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
         $clock = new Clock();
         $clock->set($now->modify('-14 days')->modify('monday this week')->format('Y-m-d') . ' 11:00:00');
-        $app = new App($db, ['jwt_secret' => $jwtSecret], $clock);
+        // o seed chama a API dezenas de vezes seguidas: limites altos, e uma chave descartável (ninguém ativa 2FA aqui)
+        $app = new App($db, [
+            'jwt_secret' => $jwtSecret,
+            'totp_key' => bin2hex(random_bytes(32)),
+            'rate_limits' => ['read' => PHP_INT_MAX, 'write' => PHP_INT_MAX, 'two_factor' => PHP_INT_MAX],
+        ], $clock);
         $users = new Repository\UserRepository($db);
 
         $people = [

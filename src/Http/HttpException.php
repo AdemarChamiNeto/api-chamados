@@ -7,12 +7,16 @@ namespace Chamados\Http;
 /** Erro que vira resposta JSON: {"error": {"code", "message", "details"?}}. */
 final class HttpException extends \RuntimeException
 {
-    /** @param array<string,string> $details */
+    /**
+     * @param array<string,string> $details
+     * @param array<string,string> $headers cabeçalhos extras da resposta (ex.: Retry-After no 429)
+     */
     public function __construct(
         public readonly int $status,
         public readonly string $errorCode,
         string $message,
         public readonly array $details = [],
+        public readonly array $headers = [],
     ) {
         parent::__construct($message);
     }

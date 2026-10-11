@@ -10,6 +10,8 @@ services:
         value: sqlite:/var/www/app/database/chamados.sqlite
       - key: JWT_SECRET
         generateValue: true
+      - key: TOTP_ENCRYPTION_KEY # criptografa o segredo do 2FA (32 bytes aleatórios)
+        generateValue: true
       - key: SEED_DEMO
         value: "1"
       - key: SLA_HOLIDAYS

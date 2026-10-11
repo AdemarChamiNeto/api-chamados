@@ -68,5 +68,41 @@ CREATE TABLE IF NOT EXISTS login_attempts (
   email VARCHAR(190) NOT NULL,
   ip VARCHAR(45) NOT NULL,
   created_at DATETIME NOT NULL,
-  INDEX idx_login_attempts (email, created_at)
+  INDEX idx_login_attempts (email, created_at),
+  INDEX idx_login_attempts_ip (ip, created_at) -- erros de login por IP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ===== 2FA (TOTP) e rate limit — tabelas novas no padrão; as antigas ficam como estão =====
+-- Credencial do segundo fator, separada do perfil (users). Uma por usuário: user_id é a própria chave.
+-- enabled_at NULL = QR gerado, mas ainda não confirmado com um código.
+CREATE TABLE IF NOT EXISTS user_totp (
+  user_id INT UNSIGNED NOT NULL PRIMARY KEY,
+  secret_encrypted VARCHAR(255) NOT NULL, -- SENSÍVEL: AES-256-GCM com TOTP_ENCRYPTION_KEY
+  enabled_at DATETIME NULL,
+  last_used_step BIGINT NULL,             -- impede reusar o mesmo código dentro dos 30 s
+  created_at DATETIME NOT NULL,
+  updated_at DATETIME NOT NULL ON UPDATE CURRENT_TIMESTAMP,
+  -- CASCADE: a credencial não tem sentido sem o usuário
+  CONSTRAINT fk_totp_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS recovery_codes (
+  id CHAR(36) NOT NULL PRIMARY KEY,       -- UUID gerado pela aplicação (o SQLite não tem UUID nativo)
+  user_id INT UNSIGNED NOT NULL,
+  code_hash CHAR(64) NOT NULL,            -- SENSÍVEL: SHA-256 do código, nunca o código
+  used_at DATETIME NULL,                  -- uso único
+  created_at DATETIME NOT NULL,
+  updated_at DATETIME NOT NULL ON UPDATE CURRENT_TIMESTAMP,
+  -- índice único com user_id primeiro: código único por conta e índice da chave estrangeira
+  UNIQUE KEY uq_recovery_user_code (user_id, code_hash),
+  -- CASCADE: códigos só valem para a conta dona
+  CONSTRAINT fk_recovery_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Contador do rate limit em janela fixa. No banco (e não em memória) porque cada requisição PHP é um processo novo.
+CREATE TABLE IF NOT EXISTS rate_limits (
+  bucket VARCHAR(190) NOT NULL,           -- categoria + quem (ex.: "write:user:7", "login:ip:1.2.3.4")
+  window_start BIGINT NOT NULL,           -- início da janela em segundos Unix
+  hits INT UNSIGNED NOT NULL DEFAULT 0,
+  PRIMARY KEY (bucket, window_start)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

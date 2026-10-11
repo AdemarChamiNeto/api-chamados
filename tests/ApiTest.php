@@ -31,7 +31,13 @@ final class ApiTest extends TestCase
         $this->db = self::freshDatabase();
         $this->clock = new Clock();
         $this->clock->set('2026-10-07 12:00:00'); // quarta, 09:00 em São Paulo
-        $this->app = new App($this->db, ['jwt_secret' => self::SECRET, 'holidays' => ['2026-10-12']], $this->clock);
+        // limites altos: estes testes fazem muitas chamadas no mesmo minuto; os limites têm testes próprios (SegurancaTest)
+        $this->app = new App($this->db, [
+            'jwt_secret' => self::SECRET,
+            'totp_key' => str_repeat('ab', 32),
+            'holidays' => ['2026-10-12'],
+            'rate_limits' => ['read' => 10_000, 'write' => 10_000],
+        ], $this->clock);
 
         $users = new UserRepository($this->db);
         foreach ([['Admin', 'admin', 'admin'], ['Téc 1', 'tec1', 'tecnico'], ['Téc 2', 'tec2', 'tecnico'], ['Sol 1', 'sol1', 'solicitante'], ['Sol 2', 'sol2', 'solicitante']] as [$name, $key, $role]) {
@@ -50,7 +56,7 @@ final class ApiTest extends TestCase
         $dsn = getenv('TEST_DB_DSN') ?: 'sqlite::memory:';
         $db = Database::connect($dsn, getenv('TEST_DB_USER') ?: null, getenv('TEST_DB_PASSWORD') ?: null);
         if (Database::driver($db) === 'mysql') {
-            foreach (['comments', 'ticket_events', 'tickets', 'login_attempts', 'users'] as $table) {
+            foreach (['comments', 'ticket_events', 'tickets', 'login_attempts', 'recovery_codes', 'user_totp', 'rate_limits', 'users'] as $table) {
                 $db->exec("DROP TABLE IF EXISTS $table");
             }
         }

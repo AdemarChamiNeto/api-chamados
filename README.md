@@ -56,8 +56,10 @@ Ir para `aguardando_usuario`, `resolvido` ou `cancelado` exige uma nota, que vir
 
 | método | rota | descrição |
 |---|---|---|
-| POST | `/api/auth/login` | JWT válido por 8 h (5 erros em 15 min bloqueiam o email) |
+| POST | `/api/auth/login` | JWT válido por 8 h (5 erros em 15 min bloqueiam o email; 20 bloqueiam o IP). Com 2FA, devolve um `pending_token` de 5 min |
+| POST | `/api/auth/2fa` | segundo passo: `pending_token` + código do app ou de recuperação |
 | GET | `/api/me` | usuário logado |
+| GET · POST | `/api/me/2fa` · `/setup` · `/enable` · `/disable` | 2FA opcional: status, QR code, ativar com o primeiro código, desativar com senha + código |
 | GET | `/api/tickets` | filtros `status`, `priority`, `category`, `assignee` (id, `me`, `none`), `overdue`, `q`; `sort` (`-priority`, `resolution_due_at`…); `page`, `per_page` |
 | POST | `/api/tickets` | abre chamado |
 | GET | `/api/tickets/{id}` | detalhe, comentários, histórico e `allowed_status` |
@@ -101,13 +103,19 @@ curl -s "localhost:8080/api/tickets?overdue=1&sort=-priority" -H "Authorization:
 
 ```bash
 composer install
-vendor/bin/phpunit                            # 51 testes, SQLite em memória
+vendor/bin/phpunit                            # 62 testes, SQLite em memória
 TEST_DB_DSN="mysql:host=127.0.0.1;dbname=chamados_test" TEST_DB_USER=app TEST_DB_PASSWORD=app vendor/bin/phpunit
 ```
 
 - **Calendário útil:** almoço, virada de dia, fim de semana, feriado, e a propriedade "somar N minutos e depois medir dá N".
 - **JWT:** expiração, payload adulterado, `alg: none`, segredo diferente.
 - **API inteira em memória** (sem servidor HTTP): login e bloqueio por tentativas, permissões, ciclo de vida completo, pausa de SLA, filtro de atrasados, comentários internos, paginação, ordenação e indicadores.
+- **Segurança:**
+  - TOTP com os vetores oficiais da RFC 6238;
+  - criptografia do segredo, recusando valor adulterado;
+  - o fluxo inteiro do 2FA: ativar, login em dois passos, token pendente que não vale como sessão e expira em 5 min, código reutilizado recusado, código de recuperação de uso único, desativar;
+  - bcrypt custo 12 com rehash de senha antiga;
+  - rate limit de leitura, escrita, 2FA (por usuário, mesmo trocando de IP) e login por IP, com `Retry-After`.
 - **Documentação:** um teste falha se alguma rota do `App` não estiver no `openapi.yaml`.
 
 O CI roda tudo em PHP 8.3 e 8.4, uma vez com SQLite e outra com MySQL 8 de verdade.
@@ -118,8 +126,8 @@ O CI roda tudo em PHP 8.3 e 8.4, uma vez com SQLite e outra com MySQL 8 de verda
 public/index.php        front controller (+ docs.html e openapi.yaml)
 src/
   App.php               injeta dependências e registra as rotas; handle(Request): Response
-  Http/                 Request, Response, Router, Validator, HttpException
-  Auth/Jwt.php          HS256 sem dependência
+  Http/                 Request, Response, Router, Validator, HttpException, RateLimiter
+  Auth/                 Jwt (HS256), Totp (RFC 6238) e Secrets (AES-256-GCM): sem dependência
   Domain/               regras puras: BusinessCalendar, Sla, Priority, TicketStatus, Role…
   Service/              TicketService, AuthService, MetricsService
   Repository/           SQL com PDO (prepared statements)
@@ -135,7 +143,14 @@ database/schema.*.sql   schema para MySQL e para SQLite
 - **Prazos gravados no banco**, não só calculados na leitura. Assim o filtro `overdue` e o indicador de atrasados são um `WHERE` com índice. Eles são recalculados quando a prioridade muda ou quando uma pausa termina.
 - **Segurança:**
   - todo SQL usa prepared statements; colunas de ordenação vêm de uma lista fixa;
-  - senhas com `password_hash`;
+  - senhas com bcrypt custo 12 (`password_hash` + rehash automático no login das senhas antigas);
+  - **2FA opcional (TOTP):**
+    - o segredo é criptografado com AES-256-GCM (`TOTP_ENCRYPTION_KEY`);
+    - o código não pode ser reutilizado (o banco guarda o último passo de 30 s);
+    - os códigos de recuperação ficam só como SHA-256 (são aleatórios e longos, então não precisam do custo do bcrypt);
+    - depois da senha certa, a API devolve só um token pendente de 5 min, que não vale como sessão;
+  - **rate limit em todas as rotas, com o contador no banco.** Cada requisição PHP é um processo novo, então memória não serviria. A API conta por usuário do token, porque atrás do Portal (BFF) todo mundo chega com o IP do servidor do Portal. O limite por IP do usuário final fica no próprio Portal;
+  - CORS desligado por padrão: o Portal chama do servidor e a documentação roda na mesma origem;
   - o JWT rejeita `alg` diferente de HS256 e compara a assinatura em tempo constante;
   - o login não revela se o email existe;
   - o usuário é relido do banco a cada requisição, então desativar a conta corta o acesso na hora;

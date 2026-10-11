@@ -22,6 +22,7 @@ services:
       DB_USER: chamados
       DB_PASSWORD: chamados
       JWT_SECRET: ${JWT_SECRET:-troque-este-segredo-de-desenvolvimento-local}
+      TOTP_ENCRYPTION_KEY: ${TOTP_ENCRYPTION_KEY:-abababababababababababababababababababababababababababababababab}
       SLA_HOLIDAYS: 2026-10-12,2026-11-02,2026-11-15,2026-11-20,2026-12-25
       SEED_DEMO: "1"
     depends_on:

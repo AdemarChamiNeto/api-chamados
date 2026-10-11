@@ -45,11 +45,32 @@ final class UserRepository
         return array_map(self::cast(...), $st->fetchAll());
     }
 
+    /** Custo do bcrypt (padrão do projeto: ≥ 12). */
+    public const BCRYPT_OPTIONS = ['cost' => 12];
+
+    public static function hashPassword(string $password): string
+    {
+        return password_hash($password, PASSWORD_BCRYPT, self::BCRYPT_OPTIONS);
+    }
+
     public function create(string $name, string $email, string $password, string $role, string $now): int
     {
         $st = $this->db->prepare('INSERT INTO users (name, email, password_hash, role, active, created_at) VALUES (?, ?, ?, ?, 1, ?)');
-        $st->execute([$name, $email, password_hash($password, PASSWORD_DEFAULT), $role, $now]);
+        $st->execute([$name, $email, self::hashPassword($password), $role, $now]);
         return (int) $this->db->lastInsertId();
+    }
+
+    public function updatePasswordHash(int $id, string $hash): void
+    {
+        $this->db->prepare('UPDATE users SET password_hash = ? WHERE id = ?')->execute([$hash, $id]);
+    }
+
+    public function passwordHash(int $id): ?string
+    {
+        $st = $this->db->prepare('SELECT password_hash FROM users WHERE id = ?');
+        $st->execute([$id]);
+        $hash = $st->fetchColumn();
+        return $hash === false ? null : (string) $hash;
     }
 
     public function emailExists(string $email): bool
@@ -75,6 +96,14 @@ final class UserRepository
     {
         $st = $this->db->prepare('SELECT COUNT(*) FROM login_attempts WHERE email = ? AND created_at >= ?');
         $st->execute([$email, $since]);
+        return (int) $st->fetchColumn();
+    }
+
+    /** Erros de login vindos de um IP (qualquer email): freio contra quem testa várias contas. */
+    public function failedLoginsFromIpSince(string $ip, string $since): int
+    {
+        $st = $this->db->prepare('SELECT COUNT(*) FROM login_attempts WHERE ip = ? AND created_at >= ?');
+        $st->execute([$ip, $since]);
         return (int) $st->fetchColumn();
     }
 

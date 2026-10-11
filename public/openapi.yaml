@@ -10,6 +10,9 @@ info:
     **Para testar aqui:** faça `POST /api/auth/login` com um usuário de demonstração (senha `senha-demo-123`):
     `admin@exemplo.com`, `bruno@exemplo.com` (técnico) ou `diego@exemplo.com` (solicitante).
     Copie o `token`, clique em **Authorize** e cole.
+
+    **Segurança:** senhas com bcrypt custo 12; 2FA opcional por TOTP (`/api/me/2fa/*`); rate limit em todas as rotas
+    (leitura 120/min, escrita 30/min por usuário; login e 2FA mais rígidos), com resposta `429` e `Retry-After`.
 servers:
   - url: /
 tags:
@@ -138,7 +141,39 @@ paths:
                 password: { type: string, example: senha-demo-123 }
       responses:
         '200':
-          description: Token JWT (8 h)
+          description: |
+            Sem 2FA: `two_factor_required: false`, `token` (JWT de 8 h) e `user`.
+            Com 2FA: `two_factor_required: true` e um `pending_token` de 5 min, que só serve para `POST /api/auth/2fa`.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  two_factor_required: { type: boolean }
+                  token: { type: string }
+                  user: { $ref: '#/components/schemas/User' }
+                  pending_token: { type: string }
+        '401': { $ref: '#/components/responses/Error' }
+        '429': { $ref: '#/components/responses/Error' }
+
+  /api/auth/2fa:
+    post:
+      tags: [Auth]
+      summary: Segundo passo do login, com o código do app ou um código de recuperação (5 tentativas / 15 min)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [pending_token, code]
+              properties:
+                pending_token: { type: string }
+                code: { type: string, example: '123456' }
+      responses:
+        '200':
+          description: Token da sessão
           content:
             application/json:
               schema:
@@ -146,6 +181,7 @@ paths:
                 properties:
                   token: { type: string }
                   user: { $ref: '#/components/schemas/User' }
+                  recovery_codes_left: { type: integer }
         '401': { $ref: '#/components/responses/Error' }
         '429': { $ref: '#/components/responses/Error' }
 
@@ -155,6 +191,44 @@ paths:
       summary: Usuário logado
       responses:
         '200': { description: Usuário, content: { application/json: { schema: { $ref: '#/components/schemas/User' } } } }
+        '401': { $ref: '#/components/responses/Error' }
+
+  /api/me/2fa:
+    get:
+      tags: [Auth]
+      summary: Se a verificação em duas etapas está ativa
+      responses:
+        '200': { description: Status, content: { application/json: { schema: { type: object, properties: { enabled: { type: boolean } } } } } }
+
+  /api/me/2fa/setup:
+    post:
+      tags: [Auth]
+      summary: Gera o segredo do 2FA e a URL do QR code (só vale depois de confirmado)
+      responses:
+        '200': { description: Segredo, content: { application/json: { schema: { type: object, properties: { secret: { type: string }, otpauth_url: { type: string } } } } } }
+        '409': { $ref: '#/components/responses/Error' }
+
+  /api/me/2fa/enable:
+    post:
+      tags: [Auth]
+      summary: Confirma o primeiro código, ativa o 2FA e devolve os códigos de recuperação (mostrados uma vez só)
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [code], properties: { code: { type: string, example: '123456' } } } } }
+      responses:
+        '200': { description: Ativado, content: { application/json: { schema: { type: object, properties: { recovery_codes: { type: array, items: { type: string } } } } } } }
+        '409': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+
+  /api/me/2fa/disable:
+    post:
+      tags: [Auth]
+      summary: Desativa o 2FA (pede a senha e um código)
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [password, code], properties: { password: { type: string }, code: { type: string } } } } }
+      responses:
+        '204': { description: Desativado }
         '401': { $ref: '#/components/responses/Error' }
 
   /api/tickets:
