@@ -3,7 +3,9 @@ FROM php:8.3-apache
 RUN docker-php-ext-install pdo_mysql \
  && a2enmod headers \
  && sed -ri 's#/var/www/html#/var/www/app/public#g' /etc/apache2/sites-available/000-default.conf \
- && printf '<Directory /var/www/app/public>\n  FallbackResource /index.php\n  AllowOverride None\n  Require all granted\n</Directory>\n' > /etc/apache2/conf-enabled/app.conf
+ && printf '<Directory /var/www/app/public>\n  FallbackResource /index.php\n  AllowOverride None\n  Require all granted\n</Directory>\n' > /etc/apache2/conf-enabled/app.conf \
+ # o Apache com mod_php não passa o header Authorization para o PHP: sem isto, toda rota com token dá 401
+ && printf 'SetEnvIf Authorization "(.+)" HTTP_AUTHORIZATION=$1\n' > /etc/apache2/conf-enabled/authorization.conf
 
 WORKDIR /var/www/app
 COPY . .

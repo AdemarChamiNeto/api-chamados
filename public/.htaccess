@@ -1,3 +1,6 @@
+# Apache com mod_php não passa o header Authorization para o PHP sem esta linha
+SetEnvIf Authorization "(.+)" HTTP_AUTHORIZATION=$1
+
 RewriteEngine On
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteRule ^ index.php [QSA,L]
