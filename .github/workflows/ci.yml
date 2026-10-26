@@ -20,7 +20,7 @@ jobs:
           MYSQL_PASSWORD: app
           MYSQL_ROOT_PASSWORD: root
         ports: ["3306:3306"]
-        options: --health-cmd="mysqladmin ping -h localhost" --health-interval=5s --health-retries=20
+        options: --health-cmd="mysqladmin ping -h 127.0.0.1" --health-interval=5s --health-retries=20
     steps:
       - uses: actions/checkout@v4
       - uses: shivammathur/setup-php@v2
